@@ -96,7 +96,7 @@ async function startServer() {
   try {
     await checkDatabaseConnection();
     app.listen(PORT, () => {
-      console.log(`☕ Coffee Bean Backend Server running on http://localhost:${PORT}`);
+      console.log(`☕ Coffee Bean Backend Server running on environment: ${process.env.NODE_ENV || 'development'} at http://localhost`);
       if (isCloudinaryConfigured()) {
         console.log(`☁️ Image Storage: Cloudinary active (uploads stream directly to Cloudinary)`);
       } else {
