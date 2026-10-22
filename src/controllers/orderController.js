@@ -180,7 +180,22 @@ exports.createOrder = async (req, res) => {
     const randomSuffix = Math.floor(10000 + Math.random() * 90000);
     const orderNumber = `CB-2026-${randomSuffix}`;
 
-    const userId = req.user ? req.user.id : null;
+    // Resolve customer user account so orders and delivery address book are always linked
+    let resolvedUserId = req.user ? req.user.id : null;
+    if (!resolvedUserId && normalizedEmail) {
+      const [uRows] = await connection.query('SELECT id FROM users WHERE email = ? LIMIT 1', [normalizedEmail]);
+      if (uRows.length > 0) {
+        resolvedUserId = uRows[0].id;
+      } else {
+        const [newUser] = await connection.query(
+          'INSERT INTO users (name, email, role, is_email_verified) VALUES (?, ?, "customer", 1)',
+          [customer_name || 'Customer', normalizedEmail]
+        );
+        resolvedUserId = newUser.insertId;
+      }
+    }
+
+    const userId = resolvedUserId;
     const shippingFee = parseFloat(req.body.shipping_fee) || 0;
     const discountAmount = parseFloat(req.body.discount_amount) || 0;
     const finalOrderTotal = Math.max(0, calculatedTotal - discountAmount + shippingFee);
@@ -220,26 +235,50 @@ exports.createOrder = async (req, res) => {
 
     const orderId = orderResult.insertId;
 
-    // Auto-save shipping address to customer's saved address book
+    // Auto-save shipping address to customer's delivery address book
+    let autoSavedAddress = null;
     if (userId && shipping_address) {
       try {
         const pinMatch = (shipping_address || '').match(/\b([1-9][0-9]{5})\b/);
-        const pin = pinMatch ? pinMatch[1] : '';
+        const pin = (req.body.shipping_parts?.pincode || (pinMatch ? pinMatch[1] : '')).trim();
+        const cleanShippingAddr = shipping_address.trim();
+
+        // Check if identical address line already exists in customer_addresses for this user
         const [existingAddr] = await connection.query(
-          `SELECT id FROM customer_addresses 
-           WHERE user_id = ? AND (address_line = ? OR (pincode = ? AND pincode != '' AND address_line LIKE ?))
+          `SELECT * FROM customer_addresses 
+           WHERE user_id = ? AND (
+             LOWER(TRIM(address_line)) = LOWER(?) 
+             OR (pincode = ? AND pincode != '' AND LOWER(TRIM(street_locality)) = LOWER(?) AND LOWER(TRIM(house_flat)) = LOWER(?))
+           )
            LIMIT 1`,
-          [userId, shipping_address.trim(), pin, `%${pin}%`]
+          [
+            userId,
+            cleanShippingAddr,
+            pin,
+            (req.body.shipping_parts?.street_locality || '').trim(),
+            (req.body.shipping_parts?.house_flat || '').trim()
+          ]
         );
 
         if (!existingAddr || existingAddr.length === 0) {
-          const parts = shipping_address.split(',').map((s) => s.trim());
-          const house = parts.length > 2 ? parts[0] : '';
-          const street = parts.length > 2 ? parts[1] : (parts[0] || '');
-          const city = parts.length > 3 ? parts[2] : '';
-          const state = parts.length > 4 ? parts[3] : '';
+          const [countRows] = await connection.query('SELECT COUNT(*) as cnt FROM customer_addresses WHERE user_id = ?', [userId]);
+          const isFirstAddress = countRows[0].cnt === 0 ? 1 : 0;
 
-          await connection.query(
+          const partsObj = req.body.shipping_parts || {};
+          let house = (partsObj.house_flat || '').trim();
+          let street = (partsObj.street_locality || '').trim();
+          let city = (partsObj.city || '').trim();
+          let state = (partsObj.state || '').trim();
+
+          if (!street) {
+            const splitParts = cleanShippingAddr.split(',').map((s) => s.trim());
+            house = splitParts.length > 2 ? splitParts[0] : '';
+            street = splitParts.length > 2 ? splitParts[1] : (splitParts[0] || '');
+            city = splitParts.length > 3 ? splitParts[2] : (splitParts[1] || 'Bengaluru');
+            state = splitParts.length > 4 ? splitParts[3].replace(/-\s*\d{6}/, '').trim() : 'Karnataka';
+          }
+
+          const [insResult] = await connection.query(
             `INSERT INTO customer_addresses 
              (user_id, label, recipient_name, phone, address_line, house_flat, street_locality, city, state, pincode, is_default)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -248,15 +287,22 @@ exports.createOrder = async (req, res) => {
               'Delivery Address',
               customer_name || 'Customer',
               customer_phone || '',
-              shipping_address.trim(),
+              cleanShippingAddr,
               house,
               street,
-              city,
-              state,
+              city || 'Bengaluru',
+              state || 'Karnataka',
               pin,
-              0
+              isFirstAddress
             ]
           );
+
+          const [savedRow] = await connection.query('SELECT * FROM customer_addresses WHERE id = ?', [insResult.insertId]);
+          if (savedRow.length > 0) {
+            autoSavedAddress = savedRow[0];
+          }
+        } else {
+          autoSavedAddress = existingAddr[0];
         }
       } catch (addrErr) {
         console.warn('Could not auto-save address to customer_addresses:', addrErr.message);
@@ -352,6 +398,7 @@ exports.createOrder = async (req, res) => {
         ...createdOrder[0],
         items: orderItemsList
       },
+      saved_address: autoSavedAddress,
       notifications: initialNotification
     });
   } catch (error) {

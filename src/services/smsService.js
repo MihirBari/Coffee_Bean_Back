@@ -54,7 +54,7 @@ function formatSMSMessage(order, event) {
       return `🚚 The Bean Co: Great news! Your order #${orderNumber} has shipped via ${courier}. AWB Tracking: ${tracking}. Est. Delivery: ${estDate}. Track: ${trackingUrl}`;
 
     case 'DELIVERED':
-      return `✨ The Bean Co: Order #${orderNumber} has been safely delivered to your doorstep! Brew fresh and enjoy your cup. Need help? Contact orders@coffeebean.in`;
+      return `✨ The Bean Co: Order #${orderNumber} has been safely delivered to your doorstep! Brew fresh and enjoy your cup. Need help? Contact info@thebean.company`;
 
     default:
       return `☕ The Bean Co: Update on Order #${orderNumber}: Status is now ${order.status || event}. Track: ${trackingUrl}`;

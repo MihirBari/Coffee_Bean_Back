@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const marketplaceController = require('../controllers/marketplaceController');
-const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { authenticateToken, authenticateOptional, requireAdmin } = require('../middleware/auth');
 
 const upload = require('../middleware/upload');
 
@@ -18,8 +18,8 @@ router.put('/return-requests/:id', authenticateToken, requireAdmin, marketplaceC
 router.put('/orders/:id/tracking', authenticateToken, requireAdmin, marketplaceController.updateOrderTracking);
 
 // Customer Multi-Address Book
-router.get('/addresses', authenticateToken, marketplaceController.getAddresses);
-router.post('/addresses', authenticateToken, marketplaceController.addAddress);
+router.get('/addresses', authenticateOptional, marketplaceController.getAddresses);
+router.post('/addresses', authenticateOptional, marketplaceController.addAddress);
 router.delete('/addresses/:id', authenticateToken, marketplaceController.deleteAddress);
 
 // Bean Coins Loyalty Wallet

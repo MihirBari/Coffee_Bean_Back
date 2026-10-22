@@ -108,6 +108,7 @@ async function sendVerificationOTP(email, purpose = 'order_checkout', ipAddress 
       const fromAddress = process.env.SMTP_FROM || `"The Bean Co. Roastery" <${process.env.SMTP_USER.trim()}>`;
       await mailer.sendMail({
         from: fromAddress,
+        replyTo: 'info@thebean.company',
         to: normalizedEmail,
         subject,
         html: htmlContent,
@@ -410,7 +411,7 @@ async function sendOrderStatusEmail({ order, items = [], event }) {
         </div>
 
         <p style="margin: 0; font-size: 11px; color: rgba(245, 239, 198, 0.5);">
-          Questions about your roast? Reply directly to this email or contact <a href="mailto:orders@coffeebean.in" style="color: #A5BCD6;">orders@coffeebean.in</a>.
+          Questions about your roast? Reply directly to this email or contact <a href="mailto:info@thebean.company" style="color: #A5BCD6;">info@thebean.company</a>.
         </p>
       </div>
 
@@ -431,6 +432,7 @@ async function sendOrderStatusEmail({ order, items = [], event }) {
       const fromAddress = process.env.SMTP_FROM || `"The Bean Co. Roastery" <${process.env.SMTP_USER.trim()}>`;
       const info = await mailer.sendMail({
         from: fromAddress,
+        replyTo: 'info@thebean.company',
         to: normalizedEmail,
         subject,
         html: htmlContent,

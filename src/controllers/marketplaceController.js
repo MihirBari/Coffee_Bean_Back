@@ -218,8 +218,27 @@ exports.updateOrderTracking = async (req, res) => {
 // 7. Customer Saved Addresses
 exports.getAddresses = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const [rows] = await pool.query('SELECT * FROM customer_addresses WHERE user_id = ? ORDER BY is_default DESC, id DESC', [userId]);
+    let userId = req.user ? req.user.id : null;
+    const emailParam = (req.query?.email || (req.user ? req.user.email : '')).trim().toLowerCase();
+
+    if (!userId && emailParam) {
+      const [uRows] = await pool.query('SELECT id FROM users WHERE email = ? LIMIT 1', [emailParam]);
+      if (uRows.length > 0) {
+        userId = uRows[0].id;
+      }
+    }
+
+    if (!userId) {
+      return res.json({ success: true, data: [] });
+    }
+
+    const [rows] = await pool.query(
+      `SELECT DISTINCT ca.* FROM customer_addresses ca
+       LEFT JOIN users u ON ca.user_id = u.id
+       WHERE ca.user_id = ? OR LOWER(TRIM(u.email)) = ?
+       ORDER BY ca.is_default DESC, ca.id DESC`,
+      [userId, emailParam]
+    );
     res.json({ success: true, data: rows });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -228,8 +247,9 @@ exports.getAddresses = async (req, res) => {
 
 exports.addAddress = async (req, res) => {
   try {
-    const userId = req.user.id;
+    let userId = req.user ? req.user.id : null;
     const {
+      email,
       label,
       recipient_name,
       phone,
@@ -242,8 +262,27 @@ exports.addAddress = async (req, res) => {
       is_default
     } = req.body;
 
-    const resolvedName = (recipient_name || req.user.name || 'Customer').trim();
-    const resolvedPhone = (phone || req.user.phone || '').trim();
+    const emailParam = (email || (req.user ? req.user.email : '')).trim().toLowerCase();
+
+    if (!userId && emailParam) {
+      const [uRows] = await pool.query('SELECT id, name, phone FROM users WHERE email = ? LIMIT 1', [emailParam]);
+      if (uRows.length > 0) {
+        userId = uRows[0].id;
+      } else {
+        const [newUser] = await pool.query(
+          'INSERT INTO users (name, email, role, is_email_verified) VALUES (?, ?, "customer", 1)',
+          [recipient_name || 'Customer', emailParam]
+        );
+        userId = newUser.insertId;
+      }
+    }
+
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'Customer account or email is required to save address' });
+    }
+
+    const resolvedName = (recipient_name || req.user?.name || 'Customer').trim();
+    const resolvedPhone = (phone || req.user?.phone || '').trim();
     const finalAddressLine = (address_line || [house_flat, street_locality, city, state].filter(Boolean).join(', ')).trim();
 
     if ((!finalAddressLine && !street_locality) || !pincode) {
@@ -254,10 +293,10 @@ exports.addAddress = async (req, res) => {
     const [existing] = await pool.query(
       `SELECT * FROM customer_addresses 
        WHERE user_id = ? AND (
-         address_line = ? OR 
-         (pincode = ? AND street_locality = ? AND house_flat = ?)
+         LOWER(TRIM(address_line)) = LOWER(?) OR 
+         (pincode = ? AND LOWER(TRIM(street_locality)) = LOWER(?) AND LOWER(TRIM(house_flat)) = LOWER(?))
        ) LIMIT 1`,
-      [userId, finalAddressLine, pincode, street_locality || '', house_flat || '']
+      [userId, finalAddressLine, pincode, (street_locality || '').trim(), (house_flat || '').trim()]
     );
 
     if (existing && existing.length > 0) {
@@ -273,7 +312,7 @@ exports.addAddress = async (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       userId,
-      label || 'Home',
+      label || 'Delivery Address',
       resolvedName,
       resolvedPhone,
       finalAddressLine,
